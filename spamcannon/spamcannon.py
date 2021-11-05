@@ -17,18 +17,21 @@ import time
 locale.setlocale(locale.LC_ALL, '') # for comma formatting
 
 #PROJECTS = ['MC2', 'ERDOS']
-PROJECTS = ['Ray']
+PROJECTS = ['MC2']
 
 MAIL_SERVER = "localhost"
 EMAIL_FROM_ADDR = "risecamp@cs.berkeley.edu"
 EMAIL_REPLY_ADDR = "risecamp@cs.berkeley.edu"
 
-EMAIL_SUBJECT = "IMPORTANT: RISECamp 2020 Tutorial Links"
+EMAIL_SUBJECT = "IMPORTANT: RISECamp 2021 MC^2 Tutorial Instructions"
 
 EMAIL_PREAMBLE = """
-Greetings from RISELab!  Here are the links for your online tutorials for Thursday, Oct 29 2020:
+
+Greetings from RISELab!  Here are the links for the MC^2 tutorial for Friday, Nov 5th 2021.
+
+Your instructor will provide instructions for how to set up and connect to the tutorial.
+
 """
-# Greetings from RISELab!  Here are the links for your online tutorials for Friday, Oct 30 2020:
 
 def generate_spam(attendee_hash, send_email=True, delay=1):
     """
@@ -50,12 +53,18 @@ def generate_spam(attendee_hash, send_email=True, delay=1):
 
         for project in PROJECTS:
             message_body += project + '\n' + \
-                            attendee_hash[email][project.lower() + '-ip'] + '\n\n'
+                            'http://' + \
+                            attendee_hash[email][project.lower() + '-ip'] + \
+                            ':8888' + \
+                            '\n'
 
-        message_body += """
-Please join the RISECamp 2020 Slack workspace for discussion and technical support:
-https://join.slack.com/t/risecamp20/shared_invite/zt-i420qexf-o1p~dtY9GntwBYi4AAwNnQ
-        """
+            message_body += 'http://' + \
+                            attendee_hash[email][project.lower() + '-ip'] + \
+                            ':8889' + \
+                            '\n\n'
+
+            message_body += 'Your password for the tutorial is:  risecamp2021'
+
         of.write('\n' + email)
         of.write(message_body)
 
@@ -93,15 +102,14 @@ def parse_attendees(input_data):
 
     attendee_data = csv.reader(attendee_raw.split('\n'))
 
+    # timestamp,fname,lname,email,ip
     for row in attendee_data:
         if row:
             print(row)
-            email = row[2]
-            attendee_hash[email]['fname'] = row[0]
-            attendee_hash[email]['lname'] = row[1]
+            email = row[3]
+            attendee_hash[email]['fname'] = row[1]
+            attendee_hash[email]['lname'] = row[2]
             attendee_hash[email]['mc2-ip'] = row[4]
-            attendee_hash[email]['ray-ip'] = row[5]
-            attendee_hash[email]['erdos-ip'] = row[6]
 
     return attendee_hash
 
