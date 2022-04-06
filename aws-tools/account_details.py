@@ -1,4 +1,12 @@
 #! /usr/bin/env python3
+"""
+account_details.py
+
+creates a CSV with members of an AWS billing org:
+
+AWS email, name, project (ou), parent (ou), date joined, spend
+"""
+import argparse
 import collections
 import csv
 import datetime
@@ -34,8 +42,9 @@ def get_latest_bill(aws_id=None, billing_bucket=None, billing_file_path=None):
         billing_data = b.get()['Body'].read().decode('utf-8')
 
     if not billing_data:
-        print("unable to find billing data (%s) in your bucket!" %
-              billing_filename)
+        print("unable to find billing data! please check aws_id (%s), billing_bucket \
+        (%s) or billing_file_path (%s)." %
+              aws_id, billing_bucket, billing_filename)
         sys.exit(-1)
 
     return csv.reader(billing_data.split('\n'))
@@ -80,49 +89,145 @@ def parse_billing_data(billing_data):
     return user_dict
 
 
-# billing_data = get_latest_bill('117716615155', 'amp_billing_bucket')
-spend_data = parse_billing_data(
-  get_latest_bill(aws_id='117716615155', billing_file_path='./mar-2022.csv')
-  )
+def generate_report(spend_data, outfile='OUT'):
+    """
+    generates a csv
+    """
 
-c = boto3.client('organizations')
+    fields = ['AWS email', 'account id', 'name', 'project', 'parent',
+              'date joined', 'spend']
 
-r = c.list_accounts()
-while True:
-    for acct in r['Accounts']:
-        if acct['Status'] == 'ACTIVE':
-            ou_r = c.list_parents(ChildId=acct['Id'])
-            ou_id = ou_r['Parents'][0]['Id']
+    c = boto3.client('organizations')
+    r = c.list_accounts()
 
-            ou_r = c.describe_organizational_unit(OrganizationalUnitId=ou_id)
-            ou_name = ou_r['OrganizationalUnit']['Name']
+    with open(outfile, 'w') as csv_file:
+        csv_writer = csv.writer(csv_file)
+        csv_writer.writerow(fields)
 
-            ou_r = c.list_parents(ChildId=ou_id)
-            ou_parent_id = ou_r['Parents'][0]['Id']
+        while True:
+            for acct in r['Accounts']:
+                if acct['Status'] == 'ACTIVE':
+                    ou_r = c.list_parents(ChildId=acct['Id'])
+                    ou_id = ou_r['Parents'][0]['Id']
 
-            if ou_parent_id == 'r-43a5':
-                ou_parent_name = 'ROOT'
+                    ou_r = c.describe_organizational_unit(
+                        OrganizationalUnitId=ou_id
+                    )
+                    ou_name = ou_r['OrganizationalUnit']['Name']
+
+                    ou_r = c.list_parents(ChildId=ou_id)
+                    ou_parent_id = ou_r['Parents'][0]['Id']
+
+                    if ou_parent_id == 'r-43a5':
+                        ou_parent_name = 'ROOT'
+                    else:
+                        ou_r = c.describe_organizational_unit(
+                            OrganizationalUnitId=ou_parent_id
+                        )
+                        ou_parent_name = ou_r['OrganizationalUnit']['Name']
+
+                    date_joined = '/'.join([str(acct['JoinedTimestamp'].month),
+                                            str(acct['JoinedTimestamp'].day),
+                                            str(acct['JoinedTimestamp'].year)])
+
+                    acct_id = acct['Id']
+                    if spend_data[acct_id]:
+                        spend = spend_data.get(acct_id)['total']
+                        spend = str(spend)
+                    else:
+                        spend = '0'
+
+                    row = [
+                        acct['Email'], acct_id, acct['Name'], ou_name,
+                        ou_parent_name, date_joined, spend
+                        ]
+                    csv_writer.writerow(row)
+
+                else:
+                    print('suspended/other:', acct['Email'], acct['Id'])
+
+            if 'NextToken' in r:
+                r = c.list_accounts(NextToken=r['NextToken'])
             else:
-                ou_r = c.describe_organizational_unit(OrganizationalUnitId=ou_parent_id)
-                ou_parent_name = ou_r['OrganizationalUnit']['Name']
+                break
 
-            date_joined = '/'.join([str(acct['JoinedTimestamp'].month),
-                                    str(acct['JoinedTimestamp'].day),
-                                    str(acct['JoinedTimestamp'].year)])
+def parse_args():
+    """
+    parse args
+    """
 
-            id = acct['Id']
-            if spend_data[id]:
-                spend = spend_data.get(id)['total']
-                spend = str(spend)
-            else:
-                spend = '0'
+    desc = """
+    desc
+    """
+    parser = argparse.ArgumentParser(description=desc)
 
-            print(','.join([acct['Email'], acct['Name'], ou_name,
-                            ou_parent_name, date_joined,
-                            spend]))
-        else:
-            print('suspended/other:', acct['Email'], acct['Id'])
-    if 'NextToken' in r:
-        r = c.list_accounts(NextToken=r['NextToken'])
-    else:
-        break
+    # AWS settings
+    parser.add_argument("-i",
+                        "--id",
+                        help="""
+AWS account ID for consolidated billing.  Required unless using the --local
+argument.
+                        """,
+                        type=str,
+                        metavar="AWS_ID")
+    parser.add_argument("-b",
+                        "--bucket",
+                        help="""
+S3 billing bucket name.  Required unless using the --local argument.
+                        """,
+                        type=str,
+                        metavar="S3_BILLING_BUCKET")
+    parser.add_argument("-L",
+                        "--local",
+                        help="""
+Read a consolidated billing CSV from the filesystem and bypass
+downloading from S3.
+                        """,
+                        type=str,
+                        metavar="LOCAL_BILLING_CSV")
+    parser.add_argument("-o",
+                        "--out",
+                        help="""
+Filename for CSV output.
+                        """,
+                        type=str,
+                        metavar="FILENAME")
+
+    args = parser.parse_args()
+
+    return args
+
+
+def main():
+    """
+    main
+    """
+
+    args = parse_args()
+
+    if args.id is None and args.local is None:
+        print("Please specify an AWS account id with the --id argument, " +
+              "unless reading in a local billing CSV with --local <filename>.")
+        sys.exit(-1)
+
+    if args.bucket is None and args.local is None:
+        print("Please specify a S3 billing bucket name with the --bucket " +
+              "argument, unless reading in a local billing CSV with --local " +
+              "<filename>.")
+        sys.exit(-1)
+
+
+    # billing_data = get_latest_bill('117716615155', 'amp_billing_bucket')
+    detailed_bill = get_latest_bill(
+        args.id,
+        args.bucket,
+        args.local
+    )
+
+    spend_data = parse_billing_data(detailed_bill)
+
+    generate_report(spend_data, args.out)
+
+
+if __name__ == "__main__":
+    main()
